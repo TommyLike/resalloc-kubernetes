@@ -1,0 +1,30 @@
+[package]
+name = "resalloc-kubernetes"
+version = "0.1.0"
+edition = "2021"
+authors = ["TommyLike <tommylikehu@gmail.com"]
+categories = ["copr", "resalloc", "kubernetes"]
+description = """
+A CLI used to allocate kubernetes pod resource for resalloc framework.
+"""
+documentation = ""
+homepage = "https://github.com/tommylike/resalloc-kubernetes"
+keywords = ["kubernetes", "copr", "resalloc"]
+license = "MIT"
+readme = "../README.md"
+repository = "https://github.com/tommylike/resalloc-kubernetes"
+
+
+[dependencies]
+clap = { version = "4.0.22", features = ["derive", "env"] }
+kube = { version = "0.76.0",features = ["runtime"] }
+k8s-openapi = { version = "0.16.0", features = ["v1_25"] }
+tokio = { version = "1.21.2", features=["full"]}
+anyhow = {version = "1.0.66"}
+serde_json = { version = "1.0"}
+handlebars = { version = "4.3.5"}
+uuid = {version = "1.2.1", features= ["v4"]}
+
+[[bin]]
+name = "resalloc-kubernetes"
+path = "src/main.rs"
