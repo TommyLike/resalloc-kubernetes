@@ -140,7 +140,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn generate_pod_yaml(add_command: &CommandAdd, namespace: &str, name: &str) -> Result<String> {
+async fn generate_pod_resource(add_command: &CommandAdd, namespace: &str, name: &str) -> Result<Pod> {
     let mut handler = Handlebars::new();
     handler.register_template_string("pod_template", RAW_POD).unwrap();
     let mut attribute:BTreeMap<&str, &str> = BTreeMap::new();
@@ -151,21 +151,57 @@ async fn generate_pod_yaml(add_command: &CommandAdd, namespace: &str, name: &str
     attribute.insert("cpu", &add_command.cpu_resource);
     attribute.insert("memory", &add_command.memory_resource);
     attribute.insert("privileged", &privileged);
-    return Ok(handler.render("pod_template", &attribute).unwrap().to_string());
+    let yaml = handler.render("pod_template", &attribute).unwrap().to_string();
+    let mut pod: Pod = serde_json::from_str(&yaml).unwrap();
+
+    //add labels
+    if add_command.additional_labels.len() != 0 {
+        let additional_labels = add_command.additional_labels.clone();
+        if let Some(ref mut l) = pod.metadata.labels {
+            for  label  in additional_labels.into_iter() {
+                let pair:Vec<&str> = label.split("=").collect();
+                if pair.len() == 2 {
+                    l.insert(pair[0].to_string(), pair[1].to_string());
+                }
+            }
+        }
+    }
+
+    //add node selector
+    if add_command.node_selector.len() != 0 {
+        if let Some(ref mut spec) = pod.spec {
+            let node_selector = add_command.node_selector.clone();
+            match spec.node_selector {
+                Some(_) => {
+                    return Err(anyhow!("generated pod resource node selector should be empty"));
+                }
+                None => {
+                    let mut container = BTreeMap::new();
+                    for  s  in node_selector.into_iter() {
+                        let pair:Vec<&str> = s.split("=").collect();
+                        if pair.len() == 2 {
+                            container.insert(pair[0].to_string(), pair[1].to_string());
+                        }
+                    }
+                    spec.node_selector = Some(container)
+                }
+            }
+        }
+    }
+    return Ok(pod);
 }
 
 async fn generate_new_pod(add_command: CommandAdd, namespace :&str, pods_api: Api<Pod>) -> Result<()> {
-    //generate pod yaml
+    //generate pod resource
     let name = format!("resalloc-{}", Uuid::new_v4().to_string());
-    let yaml = generate_pod_yaml(&add_command, namespace, &name).await?;
-    //todo: support persistent volume, node selector and additional labels
-    println!("{}", yaml);
-    let pod: Pod = serde_json::from_str(&yaml).unwrap();
+    let pod = generate_pod_resource(&add_command, namespace, &name).await?;
     let pp = PostParams::default();
     pods_api.create(&pp, &pod).await.unwrap();
+
     //wait pod to be ready
     let running = await_condition(pods_api.clone(), &name, is_pod_running());
     let _ = tokio::time::timeout(std::time::Duration::from_secs(add_command.timeout), running).await?;
+
     //check pod ip address
     let current = pods_api.get(&name).await?;
     if let Some(status) = current.status {
@@ -178,11 +214,13 @@ async fn generate_new_pod(add_command: CommandAdd, namespace :&str, pods_api: Ap
 
 async fn delete_pod(delete_command: CommandDelete, pods_api: Api<Pod>) -> Result<()> {
     println!("starting to delete {} resource", &delete_command.name);
+    //get pod by ip address
     let list_params = ListParams::default().fields(&format!("status.podIP={}", delete_command.name));
     let pods = pods_api.list(&list_params).await?;
     if pods.items.len() == 0 {
         return Err(anyhow!("failed to get get any pods within {} address", &delete_command.name));
     }
+
     for p in pods {
         let delete_params = DeleteParams::default();
         pods_api.delete(&p.name_any(), &delete_params).await?;
