@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap};
 use k8s_openapi::api::core::v1::{Pod, PersistentVolumeClaim};
 use uuid::Uuid;
 use clap::{
@@ -197,10 +197,10 @@ async fn main() -> Result<()> {
     //handle kubernetes pod resource
     match app.command {
         Some(Commands::Add(add_command)) => {
-            generate_new_resource(client.clone(), add_command, &namespace).await.unwrap();
+            generate_new_resource(client.clone(), add_command, &namespace).await?;
         }
         Some(Commands::Delete(delete_command)) => {
-            delete_resource(client.clone(), delete_command, &namespace).await.unwrap();
+            delete_resource(client.clone(), delete_command, &namespace).await?;
         }
         None => {
         }
@@ -296,6 +296,15 @@ async fn generate_pod_resource(add_command: &CommandAdd, namespace: &str, name: 
     Ok(pod)
 }
 
+async fn cleanup(pods_api: &Api<Pod>, pvc_api: &Api<PersistentVolumeClaim> ,name : &str, additional_volume: bool) -> Result<()> {
+    //pods unready, delete them
+    delete_pod_by_name(pods_api.clone(), &name).await?;
+    if additional_volume {
+        delete_pvc_by_name(pvc_api.clone(), &name).await?;
+    }
+    Ok(())
+}
+
 async fn generate_new_resource(client: Client, add_command: CommandAdd, namespace :&str) -> Result<()> {
     let pods_api:Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pvc_api: Api<PersistentVolumeClaim> = Api::namespaced(client, namespace);
@@ -321,24 +330,37 @@ async fn generate_new_resource(client: Client, add_command: CommandAdd, namespac
 
     //wait pod to be ready
     let running = await_condition(pods_api.clone(), &name, is_pod_running());
-    if let Err(error) = tokio::time::timeout(std::time::Duration::from_secs(add_command.timeout), running).await {
-        //pods unready, delete them
-        delete_pod_by_name(pods_api.clone(), &name).await?;
-        if additional_volume {
-            delete_pvc_by_name(pvc_api.clone(), &name).await?;
+    match tokio::time::timeout(std::time::Duration::from_secs(add_command.timeout), running).await  {
+        Ok(res) => match res {
+            Err(e) => {
+                cleanup(&pods_api, &pvc_api, &name, additional_volume).await?;
+                return Err(anyhow!("failed to creating new pod resource in kubernetes, due to {:?}", e));
+            },
+            Ok(_) => {
+                //check pod ip address
+                match pods_api.get(&name).await {
+                    Err(e) => {
+                        cleanup(&pods_api, &pvc_api, &name, additional_volume).await?;
+                        return Err(anyhow!("failed to getting new pod resource in kubernetes, due to {:?}", e));
+                    },
+                    Ok(current) => {
+                        if let Some(status) = current.status {
+                            if let Some(pod_ip) = status.pod_ip {
+                                println!("{}", &pod_ip);
+                                return Ok(());
+                            }
+                        }
+                        cleanup(&pods_api, &pvc_api, &name, additional_volume).await?;
+                        return Err(anyhow!("container ip address empty"));
+                    }
+                }
+            }
+        },
+        Err(e) => {
+            cleanup(&pods_api, &pvc_api, &name, additional_volume).await?;
+            return Err(anyhow!("failed to creating new pod resource in kubernetes, due to {:?}", e))
         }
-        return Err(anyhow!("failed to creating new pod resource in kubernetes, due to {:?}", error))
     }
-
-    //check pod ip address
-    let current = pods_api.get(&name).await?;
-    if let Some(status) = current.status {
-        if let Some(pod_ip) = status.pod_ip {
-            println!("{}", &pod_ip);
-            return Ok(());
-        }
-    }
-    Err(anyhow!("container ip address empty"))
 }
 
 async fn delete_resource(client: Client, delete_command: CommandDelete, namespace: &str) -> Result<()> {
