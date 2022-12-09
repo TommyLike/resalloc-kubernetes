@@ -1,6 +1,26 @@
 # Resalloc kubernetes
 resalloc-kubernetes used for generating in cluster pod resource for [COPR](https://copr.fedorainfracloud.org/) cluster.
 
+# prerequisite
+The pod's [Service Account](https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/)'s [Role](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) need pvc's `create`, `delete` and pod's `create`, `delete`, `list`, `watch`, `get` permissions,
+For example, the RBAC role should be something like:
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+...
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["create", "delete", "list", "get", "watch"]
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["create", "delete"]
+...
+```
+
+## Note
+If there'r no `delete` permissions for pod and pvc in Service Account, the alloced resource may be leaked and need to be manually released!!
+
 # Generate pod
 command would be:
 ```console
@@ -14,7 +34,7 @@ Options:
       --image-tag <IMAGE_TAG>
           specify the image tag used for generating, for example: docker.io/organization/image:tag
       --namespace <NAMESPACE>
-       
+
       --cpu-resource <CPU_RESOURCE>
           specify the request and limit cpu resource, '1', '2000m' and etc.
       --memory-resource <MEMORY_RESOURCE>
@@ -45,7 +65,7 @@ Usage: resalloc-kubernetes delete [OPTIONS] --name <NAME>
 
 Options:
       --name <NAME>            specify ip address of pod to delete. [env: RESALLOC_NAME=]
-      --namespace <NAMESPACE>  
+      --namespace <NAMESPACE>
   -h, --help                   Print help information
 
 ````
