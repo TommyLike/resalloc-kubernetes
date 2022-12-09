@@ -1,7 +1,7 @@
 # Resalloc kubernetes
 resalloc-kubernetes used for generating in cluster pod resource for [COPR](https://copr.fedorainfracloud.org/) cluster.
 
-# prerequisite
+# Prerequisite
 The pod's [Service Account](https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/)'s [Role](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) need pvc's `create`, `delete` and pod's `create`, `delete`, `list`, `watch`, `get` permissions,
 For example, the RBAC role should be something like:
 ```yaml
@@ -18,8 +18,7 @@ rules:
 ...
 ```
 
-## Note
-If there'r no `delete` permissions for pod and pvc in Service Account, the alloced resource may be leaked and need to be manually released!!
+**NOTE**: If there's no `delete` permissions for pod and pvc in Service Account, the allocated resource may be leaked and need to be released manually!
 
 # Generate pod
 command would be:

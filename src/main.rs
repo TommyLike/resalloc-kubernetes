@@ -298,9 +298,9 @@ async fn generate_pod_resource(add_command: &CommandAdd, namespace: &str, name: 
 
 async fn cleanup(pods_api: &Api<Pod>, pvc_api: &Api<PersistentVolumeClaim> ,name : &str, additional_volume: bool) -> Result<()> {
     //pods unready, delete them
-    delete_pod_by_name(pods_api.clone(), &name).await?;
+    delete_pod_by_name(pods_api.clone(), name).await?;
     if additional_volume {
-        delete_pvc_by_name(pvc_api.clone(), &name).await?;
+        delete_pvc_by_name(pvc_api.clone(), name).await?;
     }
     Ok(())
 }
@@ -334,14 +334,14 @@ async fn generate_new_resource(client: Client, add_command: CommandAdd, namespac
         Ok(res) => match res {
             Err(e) => {
                 cleanup(&pods_api, &pvc_api, &name, additional_volume).await?;
-                return Err(anyhow!("failed to creating new pod resource in kubernetes, due to {:?}", e));
+                Err(anyhow!("failed to creating new pod resource in kubernetes, due to {:?}", e))
             },
             Ok(_) => {
                 //check pod ip address
                 match pods_api.get(&name).await {
                     Err(e) => {
                         cleanup(&pods_api, &pvc_api, &name, additional_volume).await?;
-                        return Err(anyhow!("failed to getting new pod resource in kubernetes, due to {:?}", e));
+                        Err(anyhow!("failed to getting new pod resource in kubernetes, due to {:?}", e))
                     },
                     Ok(current) => {
                         if let Some(status) = current.status {
@@ -351,14 +351,14 @@ async fn generate_new_resource(client: Client, add_command: CommandAdd, namespac
                             }
                         }
                         cleanup(&pods_api, &pvc_api, &name, additional_volume).await?;
-                        return Err(anyhow!("container ip address empty"));
+                        Err(anyhow!("container ip address empty"))
                     }
                 }
             }
         },
         Err(e) => {
             cleanup(&pods_api, &pvc_api, &name, additional_volume).await?;
-            return Err(anyhow!("failed to creating new pod resource in kubernetes, due to {:?}", e))
+            Err(anyhow!("failed to creating new pod resource in kubernetes, due to {:?}", e))
         }
     }
 }
