@@ -7,11 +7,11 @@ categories = ["copr", "resalloc", "kubernetes"]
 description = """
 A CLI used to allocate kubernetes pod resource for resalloc framework.
 """
-documentation = ""
+documentation = "https://github.com/tommylike/resalloc-kubernetes/#readme"
 homepage = "https://github.com/tommylike/resalloc-kubernetes"
 keywords = ["kubernetes", "copr", "resalloc"]
 license = "MIT"
-readme = "../README.md"
+readme = "README.md"
 repository = "https://github.com/tommylike/resalloc-kubernetes"
 
 
