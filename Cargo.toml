@@ -24,6 +24,7 @@ anyhow = {version = "1.0.66"}
 serde_json = { version = "1.0"}
 handlebars = { version = "4.3.5"}
 uuid = {version = "1.2.1", features= ["v4"]}
+openssl = { version = "0.10.45", features = ["vendored"] }
 
 [[bin]]
 name = "resalloc-kubernetes"
