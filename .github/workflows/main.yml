@@ -1,12 +1,30 @@
-on: push
-name: Clippy check
+on: [push, pull_request]
+name: check
 jobs:
-  clippy_check:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
       - run: rustup component add clippy
-      - uses: actions-rs/clippy-check@v1
+      - name: prepare cross compile toolchain
+        run: |
+          sudo apt install -qq crossbuild-essential-arm64 libssl-dev
+          rustup target add aarch64-unknown-linux-gnu
+
+          # specified linker, it's needed for cross compile on linux
+          cat >> ~/.cargo/config << EOF
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+      - name: clippy check
+        uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
+      - name: check cross compile
+        run: |
+          cargo build --target aarch64-unknown-linux-gnu
+          cargo build
