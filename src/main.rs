@@ -1,16 +1,13 @@
-use std::{collections::BTreeMap};
-use k8s_openapi::api::core::v1::{Pod, PersistentVolumeClaim};
-use uuid::Uuid;
-use clap::{
-    Args, Parser, Subcommand
-};
-use kube::{
-    Client,
-    api::{Api, ListParams, DeleteParams, PostParams},
-    ResourceExt,
-    runtime::wait::{await_condition, conditions::is_pod_running}
-};
 use anyhow::{anyhow, Result};
+use clap::{Args, Parser, Subcommand};
+use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Pod};
+use kube::{
+    api::{Api, DeleteParams, ListParams, PostParams},
+    runtime::wait::{await_condition, conditions::is_pod_running},
+    Client, ResourceExt,
+};
+use std::collections::BTreeMap;
+use uuid::Uuid;
 
 use handlebars::Handlebars;
 
@@ -128,7 +125,7 @@ struct App {
     #[arg(long, global = true)]
     namespace: Option<String>,
     #[command(subcommand)]
-    command: Option<Commands>
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -136,7 +133,7 @@ enum Commands {
     #[command(about = "Create new pod resource", long_about = None)]
     Add(CommandAdd),
     #[command(about = "Delete existing pod resource by IP address", long_about = None)]
-    Delete(CommandDelete)
+    Delete(CommandDelete),
 }
 
 #[derive(Args)]
@@ -145,7 +142,9 @@ struct CommandAdd {
     #[arg(help = "timeout for waiting pod to be ready")]
     timeout: u64,
     #[arg(long)]
-    #[arg(help = "specify the image tag used for generating, for example: docker.io/organization/image:tag")]
+    #[arg(
+        help = "specify the image tag used for generating, for example: docker.io/organization/image:tag"
+    )]
     image_tag: String,
     #[arg(long)]
     #[arg(help = "specify the request and limit cpu resource, '1', '2000m' and etc.")]
@@ -154,22 +153,32 @@ struct CommandAdd {
     #[arg(help = "specify the request and limit memory resource, '1024Mi', '2Gi' and etc.")]
     memory_resource: String,
     #[arg(long)]
-    #[arg(help = "specify the node selector for pod resource in the format of 'NAME=VALUE', can be specified with multiple times")]
+    #[arg(
+        help = "specify the node selector for pod resource in the format of 'NAME=VALUE', can be specified with multiple times"
+    )]
     node_selector: Vec<String>,
     #[arg(long)]
     #[arg(help = "run pod in privileged mode")]
     privileged: bool,
     #[arg(long)]
-    #[arg(help = "specify the additional labels for pod resource in the format of 'NAME=VALUE', can be specified with multiple times")]
+    #[arg(
+        help = "specify the additional labels for pod resource in the format of 'NAME=VALUE', can be specified with multiple times"
+    )]
     additional_labels: Vec<String>,
     #[arg(long)]
-    #[arg(help = "specify the additional persistent volume size, use in group(additional_volume_size, additional_volume_class, additional_volume_mount_path).")]
+    #[arg(
+        help = "specify the additional persistent volume size, use in group(additional_volume_size, additional_volume_class, additional_volume_mount_path)."
+    )]
     additional_volume_size: Option<String>,
     #[arg(long)]
-    #[arg(help = "specify the additional persistent volume class, use in group(additional_volume_size, additional_volume_class, additional_volume_mount_path).")]
+    #[arg(
+        help = "specify the additional persistent volume class, use in group(additional_volume_size, additional_volume_class, additional_volume_mount_path)."
+    )]
     additional_volume_class: Option<String>,
     #[arg(long)]
-    #[arg(help = "specify mount point for persistent volume, use in group(additional_volume_size, additional_volume_class, additional_volume_mount_path).")]
+    #[arg(
+        help = "specify mount point for persistent volume, use in group(additional_volume_size, additional_volume_class, additional_volume_mount_path)."
+    )]
     additional_volume_mount_path: Option<String>,
 }
 
@@ -186,12 +195,8 @@ async fn main() -> Result<()> {
     let app = App::parse();
     let client = Client::try_default().await?;
     let namespace: String = match app.namespace {
-        Some(input) => {
-            input
-        },
-        None => {
-            "default".to_string()
-        }
+        Some(input) => input,
+        None => "default".to_string(),
     };
     //log preparation
     //handle kubernetes pod resource
@@ -202,30 +207,41 @@ async fn main() -> Result<()> {
         Some(Commands::Delete(delete_command)) => {
             delete_resource(client.clone(), delete_command, &namespace).await?;
         }
-        None => {
-        }
+        None => {}
     };
     Ok(())
 }
 
-async fn generate_pvc_resource(add_command: &CommandAdd, namespace: &str, name: &str) -> Result<PersistentVolumeClaim> {
+async fn generate_pvc_resource(
+    add_command: &CommandAdd,
+    namespace: &str,
+    name: &str,
+) -> Result<PersistentVolumeClaim> {
     let mut handler = Handlebars::new();
-    handler.register_template_string("pvc_template", RAW_PVC).unwrap();
-    let mut attribute:BTreeMap<&str, String> = BTreeMap::new();
+    handler
+        .register_template_string("pvc_template", RAW_PVC)
+        .unwrap();
+    let mut attribute: BTreeMap<&str, String> = BTreeMap::new();
     let volume_size = add_command.additional_volume_size.clone().unwrap();
     let volume_class = add_command.additional_volume_class.clone().unwrap();
     attribute.insert("name", name.to_string());
     attribute.insert("namespace", namespace.to_string());
-    attribute.insert("size",  volume_size);
+    attribute.insert("size", volume_size);
     attribute.insert("class", volume_class);
     let yaml = handler.render("pvc_template", &attribute).unwrap();
     Ok(serde_json::from_str(&yaml).unwrap())
 }
 
-async fn create_simple_pod_yaml(add_command: &CommandAdd, namespace: &str, name: &str) -> Result<String> {
+async fn create_simple_pod_yaml(
+    add_command: &CommandAdd,
+    namespace: &str,
+    name: &str,
+) -> Result<String> {
     let mut handler = Handlebars::new();
-    handler.register_template_string("pod_template", RAW_POD).unwrap();
-    let mut attribute:BTreeMap<&str, String> = BTreeMap::new();
+    handler
+        .register_template_string("pod_template", RAW_POD)
+        .unwrap();
+    let mut attribute: BTreeMap<&str, String> = BTreeMap::new();
     attribute.insert("name", name.to_string());
     attribute.insert("namespace", namespace.to_string());
     attribute.insert("image", add_command.image_tag.clone());
@@ -235,10 +251,16 @@ async fn create_simple_pod_yaml(add_command: &CommandAdd, namespace: &str, name:
     Ok(handler.render("pod_template", &attribute).unwrap())
 }
 
-async fn create_simple_pod_with_volume_yaml(add_command: &CommandAdd, namespace: &str, name: &str) -> Result<String> {
+async fn create_simple_pod_with_volume_yaml(
+    add_command: &CommandAdd,
+    namespace: &str,
+    name: &str,
+) -> Result<String> {
     let mut handler = Handlebars::new();
-    handler.register_template_string("pod_template", RAW_POD_WITHIN_VOLUME).unwrap();
-    let mut attribute:BTreeMap<&str, String> = BTreeMap::new();
+    handler
+        .register_template_string("pod_template", RAW_POD_WITHIN_VOLUME)
+        .unwrap();
+    let mut attribute: BTreeMap<&str, String> = BTreeMap::new();
     let mount_path = add_command.additional_volume_mount_path.clone().unwrap();
     attribute.insert("name", name.to_string());
     attribute.insert("namespace", namespace.to_string());
@@ -252,7 +274,12 @@ async fn create_simple_pod_with_volume_yaml(add_command: &CommandAdd, namespace:
     Ok(handler.render("pod_template", &attribute).unwrap())
 }
 
-async fn generate_pod_resource(add_command: &CommandAdd, namespace: &str, name: &str, create_volume: bool) -> Result<Pod> {
+async fn generate_pod_resource(
+    add_command: &CommandAdd,
+    namespace: &str,
+    name: &str,
+    create_volume: bool,
+) -> Result<Pod> {
     let mut yaml = create_simple_pod_yaml(add_command, namespace, name).await?;
     if create_volume {
         yaml = create_simple_pod_with_volume_yaml(add_command, namespace, name).await?;
@@ -262,8 +289,8 @@ async fn generate_pod_resource(add_command: &CommandAdd, namespace: &str, name: 
     if !add_command.additional_labels.is_empty() {
         let additional_labels = add_command.additional_labels.clone();
         if let Some(ref mut l) = pod.metadata.labels {
-            for  label  in additional_labels.into_iter() {
-                let pair:Vec<&str> = label.split('=').collect();
+            for label in additional_labels.into_iter() {
+                let pair: Vec<&str> = label.split('=').collect();
                 if pair.len() == 2 {
                     l.insert(pair[0].to_string(), pair[1].to_string());
                 }
@@ -277,12 +304,14 @@ async fn generate_pod_resource(add_command: &CommandAdd, namespace: &str, name: 
             let node_selector = add_command.node_selector.clone();
             match spec.node_selector {
                 Some(_) => {
-                    return Err(anyhow!("generated pod resource node selector should be empty"));
+                    return Err(anyhow!(
+                        "generated pod resource node selector should be empty"
+                    ));
                 }
                 None => {
                     let mut container = BTreeMap::new();
-                    for  s  in node_selector.into_iter() {
-                        let pair:Vec<&str> = s.split('=').collect();
+                    for s in node_selector.into_iter() {
+                        let pair: Vec<&str> = s.split('=').collect();
                         if pair.len() == 2 {
                             container.insert(pair[0].to_string(), pair[1].to_string());
                         }
@@ -296,7 +325,12 @@ async fn generate_pod_resource(add_command: &CommandAdd, namespace: &str, name: 
     Ok(pod)
 }
 
-async fn cleanup(pods_api: &Api<Pod>, pvc_api: &Api<PersistentVolumeClaim> ,name : &str, additional_volume: bool) -> Result<()> {
+async fn cleanup(
+    pods_api: &Api<Pod>,
+    pvc_api: &Api<PersistentVolumeClaim>,
+    name: &str,
+    additional_volume: bool,
+) -> Result<()> {
     //pods unready, delete them
     delete_pod_by_name(pods_api.clone(), name).await?;
     if additional_volume {
@@ -305,17 +339,22 @@ async fn cleanup(pods_api: &Api<Pod>, pvc_api: &Api<PersistentVolumeClaim> ,name
     Ok(())
 }
 
-async fn generate_new_resource(client: Client, add_command: CommandAdd, namespace :&str) -> Result<()> {
-    let pods_api:Api<Pod> = Api::namespaced(client.clone(), namespace);
+async fn generate_new_resource(
+    client: Client,
+    add_command: CommandAdd,
+    namespace: &str,
+) -> Result<()> {
+    let pods_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pvc_api: Api<PersistentVolumeClaim> = Api::namespaced(client, namespace);
     let name = format!("resalloc-{}", Uuid::new_v4());
     let pp = PostParams::default();
 
     //check persistent volume argument
     let mut additional_volume = false;
-    if add_command.additional_volume_size.is_some() &&
-        add_command.additional_volume_class.is_some() &&
-        add_command.additional_volume_mount_path.is_some() {
+    if add_command.additional_volume_size.is_some()
+        && add_command.additional_volume_class.is_some()
+        && add_command.additional_volume_mount_path.is_some()
+    {
         additional_volume = true;
     }
     //generate pvc resource
@@ -330,19 +369,25 @@ async fn generate_new_resource(client: Client, add_command: CommandAdd, namespac
 
     //wait pod to be ready
     let running = await_condition(pods_api.clone(), &name, is_pod_running());
-    match tokio::time::timeout(std::time::Duration::from_secs(add_command.timeout), running).await  {
+    match tokio::time::timeout(std::time::Duration::from_secs(add_command.timeout), running).await {
         Ok(res) => match res {
             Err(e) => {
                 cleanup(&pods_api, &pvc_api, &name, additional_volume).await?;
-                Err(anyhow!("failed to creating new pod resource in kubernetes, due to {:?}", e))
-            },
+                Err(anyhow!(
+                    "failed to creating new pod resource in kubernetes, due to {:?}",
+                    e
+                ))
+            }
             Ok(_) => {
                 //check pod ip address
                 match pods_api.get(&name).await {
                     Err(e) => {
                         cleanup(&pods_api, &pvc_api, &name, additional_volume).await?;
-                        Err(anyhow!("failed to getting new pod resource in kubernetes, due to {:?}", e))
-                    },
+                        Err(anyhow!(
+                            "failed to getting new pod resource in kubernetes, due to {:?}",
+                            e
+                        ))
+                    }
                     Ok(current) => {
                         if let Some(status) = current.status {
                             if let Some(pod_ip) = status.pod_ip {
@@ -358,21 +403,32 @@ async fn generate_new_resource(client: Client, add_command: CommandAdd, namespac
         },
         Err(e) => {
             cleanup(&pods_api, &pvc_api, &name, additional_volume).await?;
-            Err(anyhow!("failed to creating new pod resource in kubernetes, due to {:?}", e))
+            Err(anyhow!(
+                "failed to creating new pod resource in kubernetes, due to {:?}",
+                e
+            ))
         }
     }
 }
 
-async fn delete_resource(client: Client, delete_command: CommandDelete, namespace: &str) -> Result<()> {
+async fn delete_resource(
+    client: Client,
+    delete_command: CommandDelete,
+    namespace: &str,
+) -> Result<()> {
     println!("starting to delete {} resource", &delete_command.name);
-    let pods_api:Api<Pod> = Api::namespaced(client.clone(), namespace);
+    let pods_api: Api<Pod> = Api::namespaced(client.clone(), namespace);
     let pvc_api: Api<PersistentVolumeClaim> = Api::namespaced(client, namespace);
 
     //get pod by ip address
-    let list_params = ListParams::default().fields(&format!("status.podIP={}", delete_command.name));
+    let list_params =
+        ListParams::default().fields(&format!("status.podIP={}", delete_command.name));
     let pods = pods_api.list(&list_params).await?;
     if pods.items.is_empty() {
-        return Err(anyhow!("failed to get get any pods within {} address", &delete_command.name));
+        return Err(anyhow!(
+            "failed to get get any pods within {} address",
+            &delete_command.name
+        ));
     }
 
     // delete pod and pvc
