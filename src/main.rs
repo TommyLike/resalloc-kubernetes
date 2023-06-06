@@ -25,7 +25,7 @@ static RAW_POD: &str = r#"
 	"spec": {
 		"containers": [{
 			"image": "{{image}}",
-			"imagePullPolicy": "Always",
+			"imagePullPolicy": "IfNotPresent",
 			"name": "resalloc-ssh",
 			"securityContext": {
 			    "privileged": {{privileged}}
@@ -59,7 +59,7 @@ static RAW_POD_WITHIN_VOLUME: &str = r#"
 	"spec": {
 		"containers": [{
 			"image": "{{image}}",
-			"imagePullPolicy": "Always",
+			"imagePullPolicy": "IfNotPresent",
 			"name": "resalloc-ssh",
 			"securityContext": {
 			    "privileged": {{privileged}}
