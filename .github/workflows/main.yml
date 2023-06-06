@@ -11,6 +11,7 @@ jobs:
       - run: rustup component add clippy
       - name: prepare cross compile toolchain
         run: |
+          sudo apt update
           sudo apt install -qq crossbuild-essential-arm64 libssl-dev
           rustup target add aarch64-unknown-linux-gnu
 
