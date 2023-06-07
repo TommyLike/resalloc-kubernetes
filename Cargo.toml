@@ -1,6 +1,6 @@
 [package]
 name = "resalloc-kubernetes"
-version = "1.0.0"
+version = "1.0.2"
 edition = "2021"
 authors = ["TommyLike <tommylikehu@gmail.com"]
 categories = ["copr", "resalloc", "kubernetes"]
