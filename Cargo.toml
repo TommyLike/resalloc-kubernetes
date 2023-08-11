@@ -19,12 +19,14 @@ repository = "https://github.com/tommylike/resalloc-kubernetes"
 clap = { version = "4.0.22", features = ["derive", "env"] }
 kube = { version = "0.76.0",features = ["runtime"] }
 k8s-openapi = { version = "0.16.0", features = ["v1_25"] }
-tokio = { version = "1.21.2", features=["full"]}
+tokio = { version = "1", features=["full"]}
 anyhow = {version = "1.0.66"}
-serde_json = { version = "1.0"}
 handlebars = { version = "4.3.5"}
 uuid = {version = "1.2.1", features= ["v4"]}
 openssl = { version = "0.10.45", features = ["vendored"] }
+serde_yaml = "0.9.25"
+env_logger = "0.10.0"
+log = "0.4.19"
 
 [[bin]]
 name = "resalloc-kubernetes"

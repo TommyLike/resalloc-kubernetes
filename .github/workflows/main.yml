@@ -29,3 +29,6 @@ jobs:
         run: |
           cargo build --target aarch64-unknown-linux-gnu
           cargo build
+      - name: check
+        run: |
+          cargo test -r
