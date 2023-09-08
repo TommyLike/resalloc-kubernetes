@@ -37,7 +37,7 @@ spec:
   containers:
     - image: {{image}}
       imagePullPolicy: IfNotPresent
-      name: {{name}},
+      name: {{name}}
       securityContext:
         privileged: {{privileged}}
       resources:
@@ -48,11 +48,17 @@ spec:
           cpu: {{cpu}}
           memory: {{memory}}
       {{volume_mount}}"#;
+static RAW_VOLUME_HEADER: &str = "volumes:";
 
-static RAW_VOLUME: &str = r#"volumes:
+static RAW_VOLUME: &str = r#"
   - name: {{volume_name}}
     persistentVolumeClaim:
       claimName: {{claim_name}}"#;
+
+static RAW_SECRET_VOLUME: &str = r#"
+  - name: {{volume_name}}
+    secret:
+      secretName: {{secret_name}}"#;
 
 static RAW_PVC: &str = r#"apiVersion: v1
 kind: PersistentVolumeClaim
@@ -224,6 +230,18 @@ fn generate_volume_str(claim_name: &str, volume_name: &str) -> Result<String> {
     Ok(handler.render("vol_template", &attribute).unwrap())
 }
 
+fn generate_volume_secret_str(volume: &str, secret: &str) -> Result<String> {
+    let mut handler = Handlebars::new();
+    handler
+        .register_template_string("vol_secret_template", RAW_SECRET_VOLUME)
+        .unwrap();
+    let mut attribute: BTreeMap<&str, String> = BTreeMap::new();
+    attribute.insert("volume_name", volume.to_string());
+    attribute.insert("secret_name", secret.to_string());
+
+    Ok(handler.render("vol_secret_template", &attribute).unwrap())
+}
+
 fn generate_volume_mount_secret_str(
     mount_path: &str,
     sub_path: &str,
@@ -285,20 +303,21 @@ async fn create_simple_pod_yaml(
         .unwrap();
     handler.register_escape_fn(no_escape);
 
-    let mut vol: String = Default::default();
+    let mut vol :Vec<String> = Vec::new();
     let mut vol_mount_pvc: String = Default::default();
     let mut vol_mount_secret: String = Default::default();
+
     if let Some(ref secret) = add_command.secret {
         vol_mount_secret = generate_volume_mount_secret_str(
             &secret.mount_path.to_string(),
             &secret.sub_path.clone().unwrap(),
             &secret.name,
         )
-        .unwrap_or("".to_string());
+        .unwrap();
+        vol.push(generate_volume_secret_str(&secret.name, &secret.name).unwrap());
     }
     if has_volume {
-        vol = generate_volume_str(pvc_name, pvc_name)
-            .unwrap_or("".to_string());
+        vol.push(generate_volume_str(pvc_name, pvc_name).unwrap());
         vol_mount_pvc = generate_volume_mount_pvc_str(
             add_command.additional_volume_mount_path.as_ref().unwrap(),
             pvc_name,
@@ -315,7 +334,13 @@ async fn create_simple_pod_yaml(
     attribute.insert("cpu", add_command.cpu_resource.clone());
     attribute.insert("memory", add_command.memory_resource.clone());
     attribute.insert("privileged", add_command.privileged.to_string());
-    attribute.insert("volume", vol);
+    if vol.len() != 0 {
+        let mut vols :String = RAW_VOLUME_HEADER.to_string();
+        for v in vol.iter() {
+            vols = format!("{}{}", vols, v)
+        }
+        attribute.insert("volume", vols);
+    }
     attribute.insert("volume_mount", vol_mount);
     attribute.insert("has_volume", has_volume.to_string());
     let s = handler.render("pod_template", &attribute).unwrap();
@@ -506,9 +531,11 @@ async fn delete_resource(delete_command: &CommandDelete, namespace: &str) -> Res
                     info!("pod {} has been deleted", &p.name_any());
 
                     //delete pvc if needed
-                    if labels.get("has_volume").is_some() {
-                        delete_pvc_by_name(pvc_api.clone(), &p.name_any()).await?;
-                        info!("pod's pvc {} has been deleted", &p.name_any());
+                    if let Some(has_volume) = labels.get("has_volume") {
+                        if has_volume == "true" {
+                            delete_pvc_by_name(pvc_api.clone(), &p.name_any()).await?;
+                            info!("pod's pvc {} has been deleted", &p.name_any());
+                        }
                     }
                 }
             }
@@ -548,7 +575,7 @@ spec:
   containers:
   - image: openeuler/openeuler:22.03
     imagePullPolicy: IfNotPresent
-    name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71,
+    name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
     resources:
       limits:
         cpu: 100m
@@ -602,7 +629,7 @@ spec:
   containers:
   - image: openeuler/openeuler:22.03
     imagePullPolicy: IfNotPresent
-    name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71,
+    name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
     resources:
       limits:
         cpu: 100m
@@ -619,6 +646,9 @@ spec:
     - mountPath: /etc/test_mount
       name: resalloc-test_ns-test_pvc
   volumes:
+  - name: copr-secrets
+    secret:
+      secretName: copr-secrets
   - name: resalloc-test_ns-test_pvc
     persistentVolumeClaim:
       claimName: resalloc-test_ns-test_pvc
@@ -692,7 +722,7 @@ spec:
   containers:
   - image: openeuler/openeuler:22.03
     imagePullPolicy: IfNotPresent
-    name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71,
+    name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
     resources:
       limits:
         cpu: '1'
