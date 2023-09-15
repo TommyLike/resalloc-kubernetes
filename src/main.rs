@@ -129,8 +129,14 @@ struct CommandAdd {
     additional_labels: Vec<String>,
     #[arg(long)]
     #[arg(
+        help = "specify the additional labels for pvc resource in the format of 'NAME=VALUE', can be specified with multiple times"
+    )]
+    additional_pvc_labels: Vec<String>,
+    #[arg(long)]
+    #[arg(
         help = "specify the additional persistent volume size, use in group(additional_volume_size, additional_volume_class, additional_volume_mount_path)."
     )]
+    
     additional_volume_size: Option<String>,
     #[arg(long)]
     #[arg(
@@ -214,7 +220,21 @@ async fn generate_pvc_resource(
     attribute.insert("size", volume_size);
     attribute.insert("class", volume_class);
     let yaml = handler.render("pvc_template", &attribute).unwrap();
-    Ok(serde_yaml::from_str(&yaml).unwrap())
+    let mut pvc: PersistentVolumeClaim = serde_yaml::from_str(&yaml).unwrap();
+
+    //add labels
+    if !add_command.additional_pvc_labels.is_empty() {
+        let additional_labels = add_command.additional_pvc_labels.clone();
+        if let Some(ref mut l) = pvc.metadata.labels {
+            for label in additional_labels.into_iter() {
+                let pair: Vec<&str> = label.split('=').collect();
+                if pair.len() == 2 {
+                    l.insert(pair[0].to_string(), pair[1].to_string());
+                }
+            }
+        }
+    }
+    Ok(pvc)
 }
 
 fn generate_volume_str(claim_name: &str, volume_name: &str) -> Result<String> {
@@ -348,10 +368,6 @@ async fn create_simple_pod_yaml(
     Ok(s)
 }
 
-fn get_pvc_name(namespace: &str, additional_volume_class: &str) -> String {
-    format!("resalloc-{}-{}", namespace, additional_volume_class,)
-}
-
 async fn generate_pod_resource(
     add_command: &CommandAdd,
     namespace: &str,
@@ -423,21 +439,17 @@ async fn generate_new_resource(add_command: &CommandAdd, namespace: &str) -> Res
     let name = format!("resalloc-{}", Uuid::new_v4());
     let pp = PostParams::default();
     let mut pvc = None;
-    let mut pvc_name = Default::default();
 
     if add_command.additional_volume_size.is_some()
         && add_command.additional_volume_class.is_some()
         && add_command.additional_volume_mount_path.is_some()
     {
         additional_volume = true;
-        pvc_name = get_pvc_name(
-            namespace,
-            add_command.additional_volume_class.as_ref().unwrap(),
-        );
-        pvc = Some(generate_pvc_resource(add_command, namespace, &pvc_name).await?);
+
+        pvc = Some(generate_pvc_resource(add_command, namespace, &name).await?);
     }
     let pod =
-        generate_pod_resource(add_command, namespace, &name, &pvc_name, additional_volume).await?;
+        generate_pod_resource(add_command, namespace, &name, &name, additional_volume).await?;
 
     if add_command.dry_run {
         if pvc.is_some() {
@@ -559,10 +571,10 @@ async fn delete_pvc_by_name(pvc_api: Api<PersistentVolumeClaim>, name: &str) -> 
 #[cfg(test)]
 mod tests {
     use crate::CommandAdd;
-    use crate::{generate_pod_resource, generate_pvc_resource, get_pvc_name};
+    use crate::{generate_pod_resource, generate_pvc_resource};
 
     #[tokio::test]
-    async fn test_pod_template_with_volume() {
+    async fn test_pod_template_witout_volume() {
         let yaml_str = r#"apiVersion: v1
 kind: Pod
 metadata:
@@ -594,6 +606,7 @@ spec:
             memory_resource: "500Mi".to_string(),
             node_selector: Vec::new(),
             privileged: false,
+            additional_pvc_labels: Vec::new(),
             additional_labels: Vec::new(),
             additional_volume_class: None,
             additional_volume_size: None,
@@ -615,6 +628,62 @@ spec:
         assert_eq!(serde_yaml::to_string(&pod_generated).unwrap(), yaml_str);
     }
 
+    #[tokio::test]
+    async fn test_pod_template_with_labels() {
+        let yaml_str = r#"apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: resalloc-kubernetes
+    failure-domain.beta.kubernetes.io/region: region1
+    has_volume: 'false'
+  name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
+  namespace: test_ns
+spec:
+  containers:
+  - image: openeuler/openeuler:22.03
+    imagePullPolicy: IfNotPresent
+    name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
+    resources:
+      limits:
+        cpu: 100m
+        memory: 500Mi
+      requests:
+        cpu: 100m
+        memory: 500Mi
+    securityContext:
+      privileged: false
+"#;
+
+        let mock_command = CommandAdd {
+            timeout: 120,
+            image_tag: "openeuler/openeuler:22.03".to_string(),
+            cpu_resource: "100m".to_string(),
+            memory_resource: "500Mi".to_string(),
+            node_selector: Vec::new(),
+            privileged: false,
+            additional_pvc_labels: Vec::new(),
+            additional_labels: vec![("failure-domain.beta.kubernetes.io/region=region1".to_string())],
+            additional_volume_class: None,
+            additional_volume_size: None,
+            additional_volume_mount_path: None,
+            dry_run: false,
+            secret: None,
+        };
+        let name = "resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71";
+        let namespace = "test_ns";
+        let pod_generated = generate_pod_resource(&mock_command, namespace, name, "", false)
+            .await
+            .unwrap();
+
+        assert_eq!(pod_generated.metadata.name.as_ref().unwrap(), name);
+        assert_eq!(
+            pod_generated.metadata.namespace.as_ref().unwrap(),
+            namespace
+        );
+        assert_eq!(serde_yaml::to_string(&pod_generated).unwrap(), yaml_str);
+    }
+    
     #[tokio::test]
     async fn test_pod_template_with_volume_and_secret() {
         let yaml_str = r#"apiVersion: v1
@@ -644,14 +713,14 @@ spec:
       name: copr-secrets
       subPath: server-crt
     - mountPath: /etc/test_mount
-      name: resalloc-test_ns-test_pvc
+      name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
   volumes:
   - name: copr-secrets
     secret:
       secretName: copr-secrets
-  - name: resalloc-test_ns-test_pvc
+  - name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
     persistentVolumeClaim:
-      claimName: resalloc-test_ns-test_pvc
+      claimName: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
 "#;
 
         let mock_command = CommandAdd {
@@ -661,6 +730,7 @@ spec:
             memory_resource: "500Mi".to_string(),
             node_selector: Vec::new(),
             privileged: false,
+            additional_pvc_labels: Vec::new(),
             additional_labels: Vec::new(),
             additional_volume_class: Some("test_pvc".to_string()),
             additional_volume_size: Some("10Gi".to_string()),
@@ -677,11 +747,8 @@ spec:
         };
         let name = "resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71";
         let namespace = "test_ns";
-        let pvc_name = get_pvc_name(
-            namespace,
-            mock_command.additional_volume_class.as_ref().unwrap(),
-        );
-        let pod_generated = generate_pod_resource(&mock_command, namespace, name, &pvc_name, true)
+        let pvc_name = name;
+        let pod_generated = generate_pod_resource(&mock_command, namespace, name, pvc_name, true)
             .await
             .unwrap();
 
@@ -694,13 +761,14 @@ spec:
     }
 
     #[tokio::test]
-    async fn test_pod_template_without_volume() {
+    async fn test_pod_template_with_volume() {
         let pvc_yaml_str = r#"apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   labels:
     app: resalloc-kubernetes
-  name: resalloc-test_ns-test_pvc
+    failure-domain.beta.kubernetes.io/region: region1
+  name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
   namespace: test_ns
 spec:
   accessModes:
@@ -734,11 +802,11 @@ spec:
       privileged: false
     volumeMounts:
     - mountPath: /etc/test_mount
-      name: resalloc-test_ns-test_pvc
+      name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
   volumes:
-  - name: resalloc-test_ns-test_pvc
+  - name: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
     persistentVolumeClaim:
-      claimName: resalloc-test_ns-test_pvc
+      claimName: resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71
 "#;
         let mock_command = CommandAdd {
             timeout: 120,
@@ -747,6 +815,7 @@ spec:
             memory_resource: "500Mi".to_string(),
             node_selector: Vec::new(),
             privileged: false,
+            additional_pvc_labels: vec![("failure-domain.beta.kubernetes.io/region=region1".to_string())],
             additional_labels: Vec::new(),
             additional_volume_class: Some("test_pvc".to_string()),
             additional_volume_size: Some("10Gi".to_string()),
@@ -757,15 +826,12 @@ spec:
 
         let name = "resalloc-9a1884fb-8a7b-459f-aefe-c54ac1188d71";
         let namespace = "test_ns";
-        let pvc_name = get_pvc_name(
-            namespace,
-            mock_command.additional_volume_class.as_ref().unwrap(),
-        );
-        let pod_generated = generate_pod_resource(&mock_command, namespace, name, &pvc_name, true)
+        let pvc_name = name;
+        let pod_generated = generate_pod_resource(&mock_command, namespace, name, pvc_name, true)
             .await
             .unwrap();
 
-        let pvc = generate_pvc_resource(&mock_command, namespace, &pvc_name)
+        let pvc = generate_pvc_resource(&mock_command, namespace, pvc_name)
             .await
             .unwrap();
         assert_eq!(pod_generated.metadata.name.as_ref().unwrap(), name);
